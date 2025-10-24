@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片拖拽分割器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 20px;
+        }
+        #dropZone {
+            width: 400px;
+            height: 300px; /* 拉长高度到300px，使拖放区域更大更易操作 */
+            border: 2px dashed #ccc;
+            margin: 20px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #fafafa;
+            transition: border-color 0.3s;
+            cursor: pointer; /* 增加指针样式，提示可点击 */
+        }
+        #dropZone.dragover {
+            border-color: #007bff;
+            background-color: #e3f2fd;
+        }
+        #dropZone p {
+            color: #666;
+            margin: 0;
+        }
+        #splitContainer {
+            display: none;
+            border-collapse: collapse; /* 使表格紧凑，无间隙 */
+            margin: 10px auto; /* 居中表格 */
+            max-width: 100vw; /* 最大宽度不超过视口 */
+            max-height: 100vh; /* 最大高度不超过视口 */
+            width: fit-content; /* 表格宽度适应内容 */
+            table-layout: fixed; /* 固定布局，确保均匀分布 */
+        }
+        #splitContainer td {
+            padding: 0; /* 移除单元格内边距，进一步紧凑 */
+            text-align: center; /* 单元格内容居中 */
+            vertical-align: middle; /* 垂直居中 */
+            width: 50%; /* 每个单元格占50%宽度 */
+            height: 50%; /* 每个单元格占50%高度 */
+        }
+        .split-canvas {
+            border: 1px solid #ddd;
+            background-color: white;
+            display: block; /* 确保canvas块级显示，避免内联偏移 */
+            margin: 0 auto; /* canvas自身居中 */
+            max-width: 100%; /* canvas不超过单元格 */
+            max-height: 100%; /* canvas不超过单元格 */
+            width: auto;
+            height: auto;
+        }
+        #sourceImg {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>图片拖拽分割器</h1>
+    <p>将图片拖拽到下方区域，然后它将被分成四个部分（上下左右）显示。</p>
+    
+    <div id="dropZone">
+        <p>拖拽图片到这里<br>或点击选择文件</p>
+    </div>
+    
+    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+    
+    <table id="splitContainer">
+        <tr>
+            <td><canvas id="topLeft" class="split-canvas"></canvas></td>
+            <td><canvas id="topRight" class="split-canvas"></canvas></td>
+        </tr>
+        <tr>
+            <td><canvas id="bottomLeft" class="split-canvas"></canvas></td>
+            <td><canvas id="bottomRight" class="split-canvas"></canvas></td>
+        </tr>
+    </table>
+
+    <img id="sourceImg" alt="源图片">
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const splitContainer = document.getElementById('splitContainer');
+        const sourceImg = document.getElementById('sourceImg');
+
+        // 点击dropZone触发文件选择
+        dropZone.addEventListener('click', (e) => {
+            e.preventDefault(); // 防止事件冒泡
+            fileInput.click();
+        });
+
+        // 文件选择处理
+        fileInput.addEventListener('change', handleFile);
+
+        // 拖拽事件 - 增强兼容性
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        function handleFile(event) {
+            const files = event.target.files;
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file && file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        sourceImg.src = e.target.result;
+                        sourceImg.onload = splitImage;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+
+        function splitImage() {
+            const img = sourceImg;
+            const width = img.width;
+            const height = img.height;
+            const halfWidth = width / 2;
+            const halfHeight = height / 2;
+
+            // 创建四个canvas
+            const canvases = {
+                topLeft: document.getElementById('topLeft'),
+                topRight: document.getElementById('topRight'),
+                bottomLeft: document.getElementById('bottomLeft'),
+                bottomRight: document.getElementById('bottomRight')
+            };
+
+            // 保持实际像素尺寸（原图一半分辨率，不缩放内在尺寸）
+            const displayHalfWidth = Math.floor(halfWidth);
+            const displayHalfHeight = Math.floor(halfHeight);
+
+            Object.values(canvases).forEach(canvas => {
+                canvas.width = displayHalfWidth;
+                canvas.height = displayHalfHeight;
+            });
+
+            // 获取上下文
+            const ctxs = {};
+            for (let key in canvases) {
+                ctxs[key] = canvases[key].getContext('2d');
+            }
+
+            // 绘制左上
+            ctxs.topLeft.drawImage(img, 0, 0, halfWidth, halfHeight, 0, 0, displayHalfWidth, displayHalfHeight);
+
+            // 绘制右上
+            ctxs.topRight.drawImage(img, halfWidth, 0, halfWidth, halfHeight, 0, 0, displayHalfWidth, displayHalfHeight);
+
+            // 绘制左下
+            ctxs.bottomLeft.drawImage(img, 0, halfHeight, halfWidth, halfHeight, 0, 0, displayHalfWidth, displayHalfHeight);
+
+            // 绘制右下
+            ctxs.bottomRight.drawImage(img, halfWidth, halfHeight, halfWidth, halfHeight, 0, 0, displayHalfWidth, displayHalfHeight);
+
+            // 基于视口计算显示缩放（CSS尺寸），确保不超过屏幕，但实际像素不变
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            const maxDisplayWidth = viewportWidth * 0.9;
+            const maxDisplayHeight = viewportHeight * 0.8;
+            let displayScale = 1;
+            if (width > maxDisplayWidth || height > maxDisplayHeight) {
+                displayScale = Math.min(maxDisplayWidth / width, maxDisplayHeight / height);
+            }
+            const displayCanvasWidth = Math.floor(displayHalfWidth * displayScale);
+            const displayCanvasHeight = Math.floor(displayHalfHeight * displayScale);
+
+            // 设置CSS显示尺寸（小一些，但实际canvas像素保持大）
+            Object.values(canvases).forEach(canvas => {
+                canvas.style.width = displayCanvasWidth + 'px';
+                canvas.style.height = displayCanvasHeight + 'px';
+            });
+
+            // 显示分割容器
+            splitContainer.style.display = 'table';
+        }
+    </script>
+</body>
+</html>
